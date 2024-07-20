@@ -12,6 +12,19 @@
 #include <d3d11.h>
 #include <tchar.h>
 
+#include <stdio.h>
+#include <include/cef_app.h>
+#include <include/cef_client.h>
+#include <include/cef_render_handler.h>
+#include <include/cef_life_span_handler.h>
+#include <include/cef_load_handler.h>
+#include <include/wrapper/cef_helpers.h>
+#include <iostream>
+
+
+
+
+
 // Data
 static ID3D11Device*            g_pd3dDevice = nullptr;
 static ID3D11DeviceContext*     g_pd3dDeviceContext = nullptr;
@@ -26,6 +39,320 @@ void CleanupDeviceD3D();
 void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+
+
+
+class RenderHandler : public CefRenderHandler {
+    int m_Width;
+    int m_Height;
+
+    ID3D11Device* m_Device;
+    ID3D11DeviceContext* m_Context;
+
+    ID3D11Texture2D* m_Texture;
+    ID3D11ShaderResourceView* m_ResourceView;
+
+    void Cleanup()
+    {
+        if (m_Texture)
+        {
+            m_Texture->Release();
+            m_Texture = nullptr;
+        }
+
+        if (m_ResourceView)
+        {
+            m_ResourceView->Release();
+            m_ResourceView = nullptr;
+        }
+    }
+
+    HRESULT CreateTexture(int width, int height)
+    {
+        m_Width = width;
+        m_Height = height;
+
+        Cleanup();
+
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        desc.CPUAccessFlags = 0;
+
+        HRESULT hr = S_OK;
+        std::vector<UINT32> initData(width * height, 0xFF00FF00);
+
+        //ID3D11Texture2D* pTexture = nullptr;
+        D3D11_SUBRESOURCE_DATA subResource = {};
+        subResource.pSysMem = initData.data();
+        subResource.SysMemPitch = desc.Width * 4;
+        subResource.SysMemSlicePitch = 0;
+        hr = m_Device->CreateTexture2D(&desc, &subResource, &m_Texture);
+        if (FAILED(hr))
+        {
+            return false;
+        }
+        IM_ASSERT(m_Texture != nullptr);
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = desc.MipLevels;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        hr = m_Device->CreateShaderResourceView(m_Texture, &srvDesc, &m_ResourceView);
+
+        //pTexture->Release();
+
+        if (FAILED(hr))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+public:
+    RenderHandler(ID3D11Device* pDevice, ID3D11DeviceContext* pContext, int width, int height) : m_Width(width), m_Height(height), m_Device(pDevice), m_Context(pContext), m_ResourceView(nullptr), m_Texture(nullptr)
+    {
+        CreateTexture(width, height);
+    }
+
+    ~RenderHandler()
+    {
+        Cleanup();
+    }
+
+    virtual void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override
+    {
+        rect = CefRect(0, 0, m_Width, m_Height);
+    }
+
+    void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList& dirtyRects, const void* buffer, int w, int h) override
+    {
+        // Update the texture with the buffer data
+        m_Context->UpdateSubresource(m_Texture, 0, nullptr, buffer, w * 4, 0);
+    }
+
+    void Resize(int width, int height)
+    {
+        CreateTexture(width, height);
+    }
+
+    void Render()
+    {
+        m_Context->PSSetShaderResources(0, 1, &m_ResourceView);
+    }
+
+    ImTextureID GetTexture() const
+    {
+        return m_ResourceView;
+    }
+
+    IMPLEMENT_REFCOUNTING(RenderHandler);
+};
+
+// for manual render handler
+class BrowserClient :
+    public CefClient,
+    public CefLifeSpanHandler,
+    public CefLoadHandler
+{
+public:
+    BrowserClient(CefRefPtr<CefRenderHandler> ptr) :
+        handler(ptr)
+    {
+    }
+
+    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler()
+    {
+        return this;
+    }
+
+    virtual CefRefPtr<CefLoadHandler> GetLoadHandler()
+    {
+        return this;
+    }
+
+    virtual CefRefPtr<CefRenderHandler> GetRenderHandler()
+    {
+        return handler;
+    }
+
+    // CefLifeSpanHandler methods.
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser)
+    {
+        // Must be executed on the UI thread.
+        CEF_REQUIRE_UI_THREAD();
+
+        browser_id = browser->GetIdentifier();
+    }
+
+    bool DoClose(CefRefPtr<CefBrowser> browser)
+    {
+        // Must be executed on the UI thread.
+        CEF_REQUIRE_UI_THREAD();
+
+        // Closing the main window requires special handling. See the DoClose()
+        // documentation in the CEF header for a detailed description of this
+        // process.
+        if (browser->GetIdentifier() == browser_id)
+        {
+            // Set a flag to indicate that the window close should be allowed.
+            closing = true;
+        }
+
+        // Allow the close. For windowed browsers this will result in the OS close
+        // event being sent.
+        return false;
+    }
+
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser)
+    {
+    }
+
+    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode)
+    {
+        std::cout << "OnLoadEnd(" << httpStatusCode << ")" << std::endl;
+        loaded = true;
+    }
+
+    bool OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefLoadHandler::ErrorCode errorCode, const CefString& failedUrl, CefString& errorText)
+    {
+        std::cout << "OnLoadError()" << std::endl;
+        loaded = true;
+    }
+
+    void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward)
+    {
+        std::cout << "OnLoadingStateChange()" << std::endl;
+    }
+
+    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame)
+    {
+        std::cout << "OnLoadStart()" << std::endl;
+    }
+
+    bool closeAllowed() const
+    {
+        return closing;
+    }
+
+    bool isLoaded() const
+    {
+        return loaded;
+    }
+
+private:
+    int browser_id;
+    bool closing = false;
+    bool loaded = false;
+    CefRefPtr<CefRenderHandler> handler;
+
+    IMPLEMENT_REFCOUNTING(BrowserClient);
+};
+
+class Browser
+{
+    CefRefPtr<RenderHandler> render;
+    CefRefPtr<CefBrowser> browser;
+    CefRefPtr<BrowserClient> client;
+
+    int Init()
+    {
+        CefMainArgs args(GetModuleHandle(NULL));
+
+        {
+            int result = CefExecuteProcess(args, nullptr, nullptr);
+            // checkout CefApp, derive it and set it as second parameter, for more control on
+            // command args and resources.
+            if (result >= 0) // child proccess has endend, so exit.
+            {
+                return result;
+            }
+            else if (result == -1)
+            {
+                // we are here in the father proccess.
+            }
+        }
+
+        {
+            CefSettings settings;
+            settings.no_sandbox = true;
+            // Specify the paths for the resources and locales using standard Windows API calls.
+            TCHAR buffer[MAX_PATH] = { 0 };
+            if (GetModuleFileName(NULL, buffer, MAX_PATH))
+            {
+                std::wstring basePath(buffer);
+                basePath = basePath.substr(0, basePath.find_last_of(L"\\/") + 1);
+
+                // Convert the path to CEF string.
+                CefString(&settings.locales_dir_path) = std::wstring(basePath + L"locales\\");
+                CefString(&settings.resources_dir_path) = basePath;
+
+                // If needed, customize other settings as required.
+                settings.log_severity = LOGSEVERITY_DEFAULT;
+            }
+
+            bool result = CefInitialize(args, settings, nullptr, nullptr);
+            // CefInitialize creates a sub-proccess and executes the same executeable, as calling CefInitialize, if not set different in settings.browser_subprocess_path
+            // if you create an extra program just for the childproccess you only have to call CefExecuteProcess(...) in it.
+            if (!result)
+            {
+                // handle error
+                return -1;
+            }
+        }
+
+        {
+            CefWindowInfo window_info;
+            CefBrowserSettings browserSettings;
+
+            // browserSettings.windowless_frame_rate = 60; // 30 is default
+
+            window_info.SetAsWindowless(NULL); // false means no transparency (site background colour)
+
+            client = new BrowserClient(render);
+
+            browser = CefBrowserHost::CreateBrowserSync(window_info, client.get(), "http://www.google.com", browserSettings, nullptr, nullptr);
+
+            // inject user-input by calling - non-trivial for non-windows - checkout the cefclient source and the platform specific cpp, like cefclient_osr_widget_gtk.cpp for linux
+            // browser->GetHost()->SendKeyEvent(...);
+            // browser->GetHost()->SendMouseMoveEvent(...);
+            // browser->GetHost()->SendMouseClickEvent(...);
+            // browser->GetHost()->SendMouseWheelEvent(...);
+        }
+    }
+
+public:
+    Browser(CefRefPtr<RenderHandler> r) : render(r)
+    {
+        Init();
+    }
+
+    void Update()
+    {
+        CefDoMessageLoopWork();
+    }
+
+    void Render()
+    {
+        render->Render();
+    }
+
+    ~Browser()
+    {
+        CefShutdown();
+    }
+};
+
+
 
 // Main code
 int main(int, char**)
@@ -82,7 +409,11 @@ int main(int, char**)
     // Our state
     bool show_demo_window = true;
     bool show_another_window = false;
+    bool show_browser_window = true;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
+    CefRefPtr<RenderHandler> render = new RenderHandler(g_pd3dDevice, g_pd3dDeviceContext, 1024, 1024);
+    Browser browser(render);
 
     // Main loop
     bool done = false;
@@ -123,6 +454,9 @@ int main(int, char**)
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
+        browser.Update();
+        browser.Render();
+
         // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
         if (show_demo_window)
             ImGui::ShowDemoWindow(&show_demo_window);
@@ -159,6 +493,8 @@ int main(int, char**)
                 show_another_window = false;
             ImGui::End();
         }
+
+        ImGui::ShowBrowserWindow(&show_browser_window, render->GetTexture());
 
         // Rendering
         ImGui::Render();

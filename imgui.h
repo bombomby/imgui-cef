@@ -782,6 +782,9 @@ namespace ImGui
     //  - IsPopupOpen() with ImGuiPopupFlags_AnyPopupId + ImGuiPopupFlags_AnyPopupLevel: return true if any popup is open.
     IMGUI_API bool          IsPopupOpen(const char* str_id, ImGuiPopupFlags flags = 0);                         // return true if the popup is open.
 
+    // Browser
+    IMGUI_API void          ShowBrowserWindow(bool* p_open = NULL, ImTextureID tex_id = NULL);
+
     // Tables
     // - Full-featured replacement for old Columns API.
     // - See Demo->Tables for demo code. See top of imgui_tables.cpp for general commentary.
