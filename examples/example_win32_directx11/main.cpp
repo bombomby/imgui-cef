@@ -42,7 +42,6 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 
 
-
 class RenderHandler : public CefRenderHandler {
     int m_Width;
     int m_Height;
@@ -157,6 +156,7 @@ public:
 
     IMPLEMENT_REFCOUNTING(RenderHandler);
 };
+
 
 // for manual render handler
 class BrowserClient :
@@ -285,20 +285,21 @@ class Browser
         {
             CefSettings settings;
             settings.no_sandbox = true;
+
             // Specify the paths for the resources and locales using standard Windows API calls.
-            TCHAR buffer[MAX_PATH] = { 0 };
-            if (GetModuleFileName(NULL, buffer, MAX_PATH))
-            {
-                std::wstring basePath(buffer);
-                basePath = basePath.substr(0, basePath.find_last_of(L"\\/") + 1);
+            //TCHAR buffer[MAX_PATH] = { 0 };
+            //if (GetModuleFileName(NULL, buffer, MAX_PATH))
+            //{
+            //    std::wstring basePath(buffer);
+            //    basePath = basePath.substr(0, basePath.find_last_of(L"\\/") + 1);
 
-                // Convert the path to CEF string.
-                CefString(&settings.locales_dir_path) = std::wstring(basePath + L"locales\\");
-                CefString(&settings.resources_dir_path) = basePath;
+            //    // Convert the path to CEF string.
+            //    CefString(&settings.locales_dir_path) = std::wstring(basePath + L"locales\\");
+            //    CefString(&settings.resources_dir_path) = basePath;
 
-                // If needed, customize other settings as required.
-                settings.log_severity = LOGSEVERITY_DEFAULT;
-            }
+            //    // If needed, customize other settings as required.
+                  settings.log_severity = LOGSEVERITY_VERBOSE;
+            //}
 
             bool result = CefInitialize(args, settings, nullptr, nullptr);
             // CefInitialize creates a sub-proccess and executes the same executeable, as calling CefInitialize, if not set different in settings.browser_subprocess_path
