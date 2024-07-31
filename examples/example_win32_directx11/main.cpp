@@ -264,71 +264,18 @@ class Browser
     CefRefPtr<CefBrowser> browser;
     CefRefPtr<BrowserClient> client;
 
-    int Init()
+    void Init()
     {
-        CefMainArgs args(GetModuleHandle(NULL));
+        CefWindowInfo window_info;
+        CefBrowserSettings browserSettings;
 
-        {
-            int result = CefExecuteProcess(args, nullptr, nullptr);
-            // checkout CefApp, derive it and set it as second parameter, for more control on
-            // command args and resources.
-            if (result >= 0) // child proccess has endend, so exit.
-            {
-                return result;
-            }
-            else if (result == -1)
-            {
-                // we are here in the father proccess.
-            }
-        }
+        // browserSettings.windowless_frame_rate = 60; // 30 is default
 
-        {
-            CefSettings settings;
-            settings.no_sandbox = true;
+        window_info.SetAsWindowless(NULL); // false means no transparency (site background colour)
 
-            // Specify the paths for the resources and locales using standard Windows API calls.
-            //TCHAR buffer[MAX_PATH] = { 0 };
-            //if (GetModuleFileName(NULL, buffer, MAX_PATH))
-            //{
-            //    std::wstring basePath(buffer);
-            //    basePath = basePath.substr(0, basePath.find_last_of(L"\\/") + 1);
+        client = new BrowserClient(render);
 
-            //    // Convert the path to CEF string.
-            //    CefString(&settings.locales_dir_path) = std::wstring(basePath + L"locales\\");
-            //    CefString(&settings.resources_dir_path) = basePath;
-
-            //    // If needed, customize other settings as required.
-                  settings.log_severity = LOGSEVERITY_VERBOSE;
-            //}
-
-            bool result = CefInitialize(args, settings, nullptr, nullptr);
-            // CefInitialize creates a sub-proccess and executes the same executeable, as calling CefInitialize, if not set different in settings.browser_subprocess_path
-            // if you create an extra program just for the childproccess you only have to call CefExecuteProcess(...) in it.
-            if (!result)
-            {
-                // handle error
-                return -1;
-            }
-        }
-
-        {
-            CefWindowInfo window_info;
-            CefBrowserSettings browserSettings;
-
-            // browserSettings.windowless_frame_rate = 60; // 30 is default
-
-            window_info.SetAsWindowless(NULL); // false means no transparency (site background colour)
-
-            client = new BrowserClient(render);
-
-            browser = CefBrowserHost::CreateBrowserSync(window_info, client.get(), "http://www.google.com", browserSettings, nullptr, nullptr);
-
-            // inject user-input by calling - non-trivial for non-windows - checkout the cefclient source and the platform specific cpp, like cefclient_osr_widget_gtk.cpp for linux
-            // browser->GetHost()->SendKeyEvent(...);
-            // browser->GetHost()->SendMouseMoveEvent(...);
-            // browser->GetHost()->SendMouseClickEvent(...);
-            // browser->GetHost()->SendMouseWheelEvent(...);
-        }
+        browser = CefBrowserHost::CreateBrowserSync(window_info, client.get(), "http://www.google.com", browserSettings, nullptr, nullptr);
     }
 
 public:
@@ -353,11 +300,49 @@ public:
     }
 };
 
+int InitCef()
+{
+	CefMainArgs args( GetModuleHandle( NULL ) );
 
+	{
+		int result = CefExecuteProcess( args, nullptr, nullptr );
+		// checkout CefApp, derive it and set it as second parameter, for more control on
+		// command args and resources.
+		if( result >= 0 ) // child proccess has endend, so exit.
+		{
+			return result;
+		}
+		else if( result == -1 )
+		{
+			// we are here in the father proccess.
+		}
+	}
+
+	{
+		CefSettings settings;
+		settings.no_sandbox = true;
+		settings.log_severity = LOGSEVERITY_VERBOSE;
+
+		bool result = CefInitialize( args, settings, nullptr, nullptr );
+		// CefInitialize creates a sub-proccess and executes the same executeable, as calling CefInitialize, if not set
+		// different in settings.browser_subprocess_path if you create an extra program just for the childproccess you
+		// only have to call CefExecuteProcess(...) in it.
+		if( !result )
+		{
+			// handle error
+			return -1;
+		}
+	}
+	return -1;
+}
 
 // Main code
 int main(int, char**)
 {
+	int cefResult = InitCef();
+	if( cefResult >= 0 )
+		return cefResult;
+
     // Create application window
     //ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"ImGui Example", nullptr };
